@@ -1,0 +1,18 @@
+# 依赖与构建产物
+node_modules
+dist
+*.log
+.DS_Store
+.vite
+
+# Chrome 打包私钥与 crx（私钥绝不入库！）
+*.pem
+*.crx
+
+# 本地编辑器 / 工具配置
+.claude/
+.vscode/
+.idea/
+
+# 允许发布用的 zip 包入库（放在 release/ 下）
+!release/
