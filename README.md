@@ -2,6 +2,31 @@
 
 面向**实习/校招投递**与**科研套词（联系教授、申请 RA/研究生）**的 Chrome 扩展。以「个人结构化数据」为中枢：一次录入，处处复用。
 
+## 安装
+
+### 方法一：下载安装包（推荐，无需命令行）
+
+1. 点击 **[下载最新版 v0.1.2 安装包（ZIP）](https://raw.githubusercontent.com/Sherlockwz/career-research-copilot/main/release/career-research-copilot-v0.1.2.zip)**。也可以从仓库的 [`release/` 目录](release/)找到安装包；如果进入了 GitHub 的文件预览页，点击「下载原始文件」。
+2. 解压 ZIP，并把解压出的文件夹放在一个不会随意移动或删除的位置。确认所选文件夹里能直接看到 `manifest.json`；**不要直接选择 ZIP 文件，也不要选择多套了一层的上级文件夹**。
+3. 在 Chrome 地址栏输入 `chrome://extensions` 并回车，开启页面右上角的「开发者模式」。
+4. 点击「加载已解压的扩展程序」，选择第 2 步中包含 `manifest.json` 的文件夹。出现「求职科研助手」卡片即安装完成。
+5. 点击浏览器工具栏的拼图图标，可将插件固定到工具栏；点击插件图标，再进入「设置 / 简历」配置模型和 API Key。
+
+### 方法二：通过命令行构建，再加载到 Chrome
+
+需要 Git、**Node.js ≥ 18** 和 npm。安装 Node.js 可参考 [nodejs.org](https://nodejs.org)。在终端执行：
+
+```bash
+git clone https://github.com/Sherlockwz/career-research-copilot.git
+cd career-research-copilot
+npm ci
+npm run build
+```
+
+构建后，按方法一的第 3～5 步操作，但在「加载已解压的扩展程序」时选择项目的 **`dist/` 文件夹**（其中直接包含 `manifest.json`）。命令行负责生成插件文件，Chrome 中仍需完成这一步加载。开发时可选运行 `npm test`；使用 `npm run dev` 后，可在扩展管理页点击插件卡片上的刷新图标。
+
+**更新已有的解压版：**将新版解压文件复制到原来加载插件的文件夹并替换旧文件，保持文件夹路径不变；然后在 `chrome://extensions` 点击该插件的刷新图标，并刷新正在使用的网页。若改从另一个文件夹重新加载，Chrome 可能分配新的扩展 ID，原来的本地个人数据不会自动迁移。
+
 > **接手开发者请先读 [`docs/HANDOFF.md`](docs/HANDOFF.md)** —— 5 分钟跑起来 + 代码地图 + 待办。
 > 背景与演进：[`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md)（需求）· [`docs/DEVELOPMENT_LOG.md`](docs/DEVELOPMENT_LOG.md)（开发历程）。
 
@@ -20,28 +45,6 @@
 - 个人数据、简历原文存在浏览器本地（IndexedDB）；设置与映射存 `chrome.storage.local`。
 - API Key 只在本地保存、只在 background 读取，调用直接发往你选择的服务商，不经本项目服务器。
 - 使用模型解析简历或分析网页时，相关文本和个人数据会发送给你选择的模型服务商。
-
-## 环境要求
-
-需要 **Node.js ≥ 18**。未安装可从 [nodejs.org](https://nodejs.org) 装 LTS，或用 nvm。安装后确认：
-
-```bash
-node -v && npm -v
-```
-
-## 构建与加载
-
-```bash
-npm ci
-npm test
-npm run build
-```
-
-然后在 Chrome 打开 `chrome://extensions` → 开启右上角「开发者模式」→「加载已解压的扩展程序」→ 选择本项目的 `dist/` 目录。
-
-> 若不想构建：解压 [`release/career-research-copilot-v0.1.2.zip`](release/career-research-copilot-v0.1.2.zip)，加载解压出的目录。已有解压版可将新版文件复制到原加载目录，随后在扩展管理页刷新插件及目标网页。
-
-开发热更新（可选）：`npm run dev`，然后在扩展页点插件「刷新」。
 
 ## 使用流程
 
