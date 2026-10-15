@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { ProfileData } from '@/types/profile'
+import { hasProfileData } from '@/types/profile'
 import { extractPdfText } from '@/lib/resume/pdf'
 import { api } from '@/shared/ui'
 
@@ -8,27 +9,39 @@ export function ImportTab({
   onImported,
 }: {
   profile: ProfileData
-  onImported: (p: ProfileData) => Promise<void>
+  onImported: (p: ProfileData, expectedUpdatedAt: number) => Promise<void>
 }) {
   const [status, setStatus] = useState('')
   const [busy, setBusy] = useState(false)
   const [url, setUrl] = useState('')
   const [pastedText, setPastedText] = useState('')
   const [showPaste, setShowPaste] = useState(false)
-  const hasData = profile.experiences.length > 0 || !!profile.basic.name
+
+  function confirmReplacement(): boolean {
+    if (!hasProfileData(profile)) return true
+    const current = profile.basic.name || profile.basic.nameEn || '当前求职人'
+    const ok = window.confirm(
+      `当前保存的是「${current}」的资料。继续导入会用这次解析的内容整体覆盖现有个人资料，并清除旧的预填映射和分析结果。请确认新资料属于要使用的求职人。`
+    )
+    if (!ok) setStatus('已取消导入，原有资料未改变。')
+    return ok
+  }
 
   async function structure(text: string) {
     if (!text.trim()) {
       setStatus('没有可解析的文本')
       return
     }
+    if (!confirmReplacement()) return
+    const expectedUpdatedAt = profile.updatedAt
     setBusy(true)
     setStatus('调用模型结构化中…（需已在设置里配置 API Key）')
     try {
-      const r = await api.structure(text, hasData) // 已有数据则合并
+      const r = await api.structure(text)
       if (!r.ok || !r.profile) throw new Error(r.error ?? '解析失败')
-      await onImported(r.profile)
-      setStatus('✅ 解析完成，请到「数据编辑」核对。')
+      if (!hasProfileData(r.profile)) throw new Error('未识别出个人信息，原有资料已保留。')
+      await onImported(r.profile, expectedUpdatedAt)
+      setStatus('✅ 已替换个人资料，请到「数据编辑」核对。')
     } catch (e) {
       setStatus('❌ ' + String((e as Error).message ?? e))
     } finally {
@@ -42,13 +55,16 @@ export function ImportTab({
       setStatus('请先填写主页链接')
       return
     }
+    if (!confirmReplacement()) return
+    const expectedUpdatedAt = profile.updatedAt
     setBusy(true)
     setStatus('正在读取网页并解析…（由插件抓取网页正文后交给模型）')
     try {
-      const r = await api.structureUrl(url.trim(), hasData)
+      const r = await api.structureUrl(url.trim())
       if (!r.ok || !r.profile) throw new Error(r.error ?? '解析失败')
-      await onImported(r.profile)
-      setStatus('✅ 已从主页读取并解析完成，请到「数据编辑」核对。')
+      if (!hasProfileData(r.profile)) throw new Error('未识别出个人信息，原有资料已保留。')
+      await onImported(r.profile, expectedUpdatedAt)
+      setStatus('✅ 已用主页内容替换个人资料，请到「数据编辑」核对。')
     } catch (e) {
       setStatus('❌ ' + String((e as Error).message ?? e))
     } finally {
@@ -63,12 +79,12 @@ export function ImportTab({
       const text = await extractPdfText(file)
       if (!text || text.length < 20) {
         setStatus('PDF 文本过少，可能是扫描件。可尝试粘贴文本或换文件。')
-        setBusy(false)
         return
       }
       await structure(text)
     } catch (e) {
       setStatus('❌ 提取失败：' + String((e as Error).message ?? e))
+    } finally {
       setBusy(false)
     }
   }
@@ -88,7 +104,8 @@ export function ImportTab({
             disabled={busy}
             onChange={(e) => {
               const f = e.target.files?.[0]
-              if (f) handlePdf(f)
+              e.target.value = ''
+              if (f) void handlePdf(f)
             }}
           />
           <span className="cursor-pointer rounded bg-brand-500 text-white px-4 py-2 text-sm hover:bg-brand-600">
@@ -100,7 +117,7 @@ export function ImportTab({
       <div>
         <h2 className="text-lg font-semibold mb-1">从个人主页读取</h2>
         <p className="text-sm text-slate-500 mb-2">
-          粘贴你的个人主页 / 学术主页链接，插件会自动读取网页正文并解析补全到你的数据里，无需手动复制内容。
+          粘贴个人主页 / 学术主页链接，插件会读取正文并生成一份新资料。已有资料会在确认后整体替换。
         </p>
         <div className="flex gap-2">
           <input
@@ -143,7 +160,7 @@ export function ImportTab({
               onClick={() => structure(pastedText)}
               className="mt-2 rounded border border-brand-500 text-brand-600 px-4 py-2 text-sm hover:bg-brand-50 disabled:opacity-50"
             >
-              解析并补全
+              解析并替换
             </button>
           </div>
         )}

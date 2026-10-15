@@ -104,4 +104,4 @@ src/
 
 - **不要提交 `*.pem`（Chrome 打包私钥）**，已在 `.gitignore` 排除。`node_modules`、`dist`、`.claude/` 也已忽略。
 - API Key 属于用户隐私，只存本地、只在 background 读，别往content script 或日志里传。
-- 当前构建产物的 zip 是 `release/career-research-copilot-v0.1.1.zip`（若需免构建直接安装）；旧版 v0.1.0 zip 保留作历史版本。
+- 当前构建产物的 zip 是 `release/career-research-copilot-v0.1.2.zip`（若需免构建直接安装）；旧版 zip 保留作历史版本。

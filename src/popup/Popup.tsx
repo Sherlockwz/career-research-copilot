@@ -63,7 +63,8 @@ export function Popup() {
   }
 
   if (view === 'fill') {
-    return <FillPanel profile={profile} onBack={() => setView('home')} />
+    if (loading) return <div className="p-4 text-sm text-slate-500">正在加载个人数据…</div>
+    return <FillPanel key={profile.updatedAt} profile={profile} onBack={() => setView('home')} />
   }
 
   return (
@@ -138,14 +139,14 @@ export function Popup() {
           </label>
         )}
         <button
-          disabled={!page}
+          disabled={!page || loading || !!profileError}
           onClick={handleAnalyze}
           className="w-full rounded-lg bg-brand-500 text-white py-2 font-medium disabled:opacity-50 hover:bg-brand-600"
         >
           扫描当前页并给建议
         </button>
         <button
-          disabled={!page}
+          disabled={!page || loading || !!profileError}
           onClick={() => setView('fill')}
           className="w-full rounded-lg border border-brand-500 text-brand-600 py-2 font-medium disabled:opacity-50 hover:bg-brand-50"
         >

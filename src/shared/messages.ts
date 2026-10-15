@@ -48,8 +48,10 @@ export type Message =
   // UI -> background
   | { type: 'GET_PROFILE' }
   | { type: 'SAVE_PROFILE'; profile: ProfileData }
-  | { type: 'STRUCTURE_TEXT'; text: string; mergeInto?: boolean }
-  | { type: 'STRUCTURE_URL'; url: string; mergeInto?: boolean }
+  | { type: 'REPLACE_PROFILE'; profile: ProfileData; expectedUpdatedAt: number }
+  | { type: 'CLEAR_PERSONAL_DATA'; expectedUpdatedAt: number }
+  | { type: 'STRUCTURE_TEXT'; text: string }
+  | { type: 'STRUCTURE_URL'; url: string }
   | { type: 'ANALYZE_PAGE'; page: ScannedPage }
   | { type: 'QUEUE_ANALYSIS'; page: ScannedPage; requestId: string }
   | { type: 'TEST_LLM' }
