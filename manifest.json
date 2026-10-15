@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "求职科研助手 Career & Research Copilot",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "简历解析、自动预填、页面扫描与岗位/教授匹配及套词建议",
   "permissions": ["storage", "activeTab", "scripting", "sidePanel", "tabs"],
   "host_permissions": ["<all_urls>"],

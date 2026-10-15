@@ -56,13 +56,11 @@ function sigText(d: DetectedField): string {
 // autocomplete 标准值 -> path
 const AUTOCOMPLETE_MAP: Record<string, string> = {
   name: 'basic.name',
-  'given-name': 'basic.name',
   email: 'basic.email',
   tel: 'basic.phone',
   'tel-national': 'basic.phone',
-  'street-address': 'basic.location',
-  organization: 'latestSchool',
 }
+const UNSAFE_AUTOCOMPLETE = new Set(['given-name', 'family-name', 'street-address', 'organization'])
 
 export function matchFields(
   fields: DetectedField[],
@@ -85,8 +83,10 @@ export function matchFields(
     }
 
     // 2) autocomplete 属性
-    if (!path && f.signature.autocomplete) {
-      const ac = AUTOCOMPLETE_MAP[f.signature.autocomplete.toLowerCase()]
+    const autocomplete = f.signature.autocomplete?.toLowerCase().split(/\s+/).pop() ?? ''
+    if (!path && UNSAFE_AUTOCOMPLETE.has(autocomplete)) continue
+    if (!path && autocomplete) {
+      const ac = AUTOCOMPLETE_MAP[autocomplete]
       if (ac) {
         path = ac
         confidence = 0.8

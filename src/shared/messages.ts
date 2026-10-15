@@ -51,6 +51,7 @@ export type Message =
   | { type: 'STRUCTURE_TEXT'; text: string; mergeInto?: boolean }
   | { type: 'STRUCTURE_URL'; url: string; mergeInto?: boolean }
   | { type: 'ANALYZE_PAGE'; page: ScannedPage }
+  | { type: 'QUEUE_ANALYSIS'; page: ScannedPage; requestId: string }
   | { type: 'TEST_LLM' }
   // background -> UI（响应用 sendResponse，这里定义 response 载荷）
 
@@ -71,6 +72,11 @@ export interface TestLlmResult {
   error?: string
 }
 
+export type AnalysisState =
+  | { status: 'pending'; page: ScannedPage; requestId: string }
+  | { status: 'complete'; page: ScannedPage; requestId: string; suggestion: Suggestion }
+  | { status: 'error'; page: ScannedPage; requestId: string; error: string }
+
 // 便捷发送封装
 export function sendMessage<T = unknown>(msg: Message): Promise<T> {
   return chrome.runtime.sendMessage(msg)
@@ -78,6 +84,55 @@ export function sendMessage<T = unknown>(msg: Message): Promise<T> {
 
 export async function sendToActiveTab<T = unknown>(msg: Message): Promise<T> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+  if (!tab) throw new Error('未找到活动标签页')
+  return sendToTab<T>(tab, msg)
+}
+
+export async function sendToTab<T = unknown>(tab: chrome.tabs.Tab, msg: Message): Promise<T> {
   if (!tab?.id) throw new Error('未找到活动标签页')
-  return chrome.tabs.sendMessage(tab.id, msg)
+  if (!tab.url || !/^https?:\/\//i.test(tab.url)) {
+    throw new Error('此页面不能由扩展读取。请打开普通 http/https 网页；浏览器内置页、扩展页和本地文件页不受支持。')
+  }
+
+  try {
+    return unwrapResponse<T>(await chrome.tabs.sendMessage(tab.id, msg))
+  } catch (error) {
+    if (!isMissingReceiver(error)) throw error
+  }
+
+  // 扩展安装或刷新前已经打开的标签页不会自动加载内容脚本。
+  const files = chrome.runtime.getManifest().content_scripts?.flatMap((script) => script.js ?? []) ?? []
+  if (!files.length) throw new Error('扩展缺少页面脚本，请重新构建并加载扩展。')
+  try {
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files })
+  } catch (error) {
+    throw new Error(`无法在此网页读取内容：${errorMessage(error)}。请检查扩展的站点访问权限，或刷新网页后重试。`)
+  }
+
+  // 打包后的内容脚本可能异步加载模块，注入成功后稍候再发送。
+  for (let attempt = 0; attempt < 8; attempt++) {
+    try {
+      return unwrapResponse<T>(await chrome.tabs.sendMessage(tab.id, msg))
+    } catch (error) {
+      if (!isMissingReceiver(error)) throw error
+      await new Promise((resolve) => setTimeout(resolve, 150))
+    }
+  }
+  throw new Error('页面脚本未能启动。请刷新网页并重试；若仍失败，请检查扩展的站点访问权限。')
+}
+
+function unwrapResponse<T>(value: unknown): T {
+  if (value == null) throw new Error('页面脚本没有返回结果，请刷新网页后重试。')
+  if (typeof value === 'object' && 'ok' in value && value.ok === false) {
+    throw new Error('error' in value ? String(value.error) : '页面读取失败')
+  }
+  return value as T
+}
+
+function isMissingReceiver(error: unknown): boolean {
+  return /Receiving end does not exist|Could not establish connection/i.test(errorMessage(error))
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }

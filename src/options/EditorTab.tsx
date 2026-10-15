@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { ReactNode } from 'react'
 import type { ProfileData, ExperienceItem } from '@/types/profile'
 
@@ -33,8 +34,24 @@ export function EditorTab({
 }: {
   profile: ProfileData
   onChange: (p: ProfileData) => void
-  onSave: () => void
+  onSave: () => Promise<void>
 }) {
+  const [saveStatus, setSaveStatus] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  async function handleSave() {
+    setSaving(true)
+    setSaveStatus('保存中…')
+    try {
+      await onSave()
+      setSaveStatus('已保存')
+    } catch (e) {
+      setSaveStatus('保存失败：' + String((e as Error).message ?? e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
   function patch(mut: (p: ProfileData) => void) {
     const next: ProfileData = JSON.parse(JSON.stringify(profile))
     mut(next)
@@ -45,12 +62,16 @@ export function EditorTab({
     <div className="max-w-3xl space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">个人数据</h2>
-        <button
-          onClick={onSave}
-          className="rounded bg-brand-500 text-white px-4 py-2 text-sm hover:bg-brand-600"
-        >
-          保存
-        </button>
+        <div className="flex items-center gap-2">
+          {saveStatus && <span className="text-xs text-slate-500">{saveStatus}</span>}
+          <button
+            onClick={() => void handleSave()}
+            disabled={saving}
+            className="rounded bg-brand-500 text-white px-4 py-2 text-sm hover:bg-brand-600"
+          >
+            保存
+          </button>
+        </div>
       </div>
 
       {/* 基本信息 */}

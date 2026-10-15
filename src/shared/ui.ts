@@ -9,6 +9,7 @@ import type {
   AnalyzeResult,
   StructureResult,
   TestLlmResult,
+  AnalysisState,
 } from '@/shared/messages'
 import { sendMessage, sendToActiveTab } from '@/shared/messages'
 import type { Suggestion } from '@/types'
@@ -16,12 +17,21 @@ import type { Suggestion } from '@/types'
 export function useProfile() {
   const [profile, setProfile] = useState<ProfileData>(emptyProfile())
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
   const reload = useCallback(async () => {
     setLoading(true)
-    const p = await sendMessage<ProfileData>({ type: 'GET_PROFILE' })
-    setProfile(p ?? emptyProfile())
-    setLoading(false)
+    setError('')
+    try {
+      const p = await sendMessage<ProfileData | { ok: false; error: string }>({ type: 'GET_PROFILE' })
+      if (!p) setProfile(emptyProfile())
+      else if ('ok' in p) throw new Error(p.error)
+      else setProfile(p)
+    } catch (e) {
+      setError(String((e as Error).message ?? e))
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
   useEffect(() => {
@@ -29,11 +39,12 @@ export function useProfile() {
   }, [reload])
 
   const save = useCallback(async (p: ProfileData) => {
-    await sendMessage({ type: 'SAVE_PROFILE', profile: p })
+    const result = await sendMessage<{ ok: boolean; error?: string }>({ type: 'SAVE_PROFILE', profile: p })
+    if (!result?.ok) throw new Error(result?.error ?? '保存个人数据失败')
     setProfile(p)
   }, [])
 
-  return { profile, setProfile, loading, reload, save }
+  return { profile, setProfile, loading, error, reload, save }
 }
 
 // —— 各类后台/内容脚本调用封装 ——
@@ -58,21 +69,28 @@ export const api = {
   testLlm: () => sendMessage<TestLlmResult>({ type: 'TEST_LLM' }),
 }
 
-// 把分析结果暂存，供 side panel 读取
-const SUGGESTION_KEY = 'lastSuggestion'
-export async function stashSuggestion(s: Suggestion, page: ScannedPage) {
-  await chrome.storage.local.set({ [SUGGESTION_KEY]: { s, page, at: Date.now() } })
+const ANALYSIS_KEY = 'currentAnalysis'
+
+export async function readAnalysis(): Promise<AnalysisState | null> {
+  const r = await chrome.storage.local.get(ANALYSIS_KEY)
+  return r[ANALYSIS_KEY] ?? null
 }
-export async function readSuggestion(): Promise<{
-  s: Suggestion
-  page: ScannedPage
-} | null> {
-  const r = await chrome.storage.local.get(SUGGESTION_KEY)
-  return r[SUGGESTION_KEY] ?? null
+
+export async function finishAnalysis(
+  requestId: string,
+  result: { suggestion: Suggestion } | { error: string }
+): Promise<void> {
+  const current = await readAnalysis()
+  if (current?.requestId !== requestId || current.status !== 'pending') return
+  const next: AnalysisState = 'suggestion' in result
+    ? { status: 'complete', page: current.page, requestId, suggestion: result.suggestion }
+    : { status: 'error', page: current.page, requestId, error: result.error }
+  await chrome.storage.local.set({ [ANALYSIS_KEY]: next })
 }
-export function onSuggestionChange(cb: () => void): () => void {
+
+export function onAnalysisChange(cb: () => void): () => void {
   const listener = (changes: Record<string, chrome.storage.StorageChange>) => {
-    if (changes[SUGGESTION_KEY]) cb()
+    if (changes[ANALYSIS_KEY]) cb()
   }
   chrome.storage.onChanged.addListener(listener)
   return () => chrome.storage.onChanged.removeListener(listener)

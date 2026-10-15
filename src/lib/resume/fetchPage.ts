@@ -75,6 +75,7 @@ export async function fetchPageText(url: string): Promise<FetchedPage> {
   if (text.length < 40) {
     throw new Error(
       '抓到的正文过少（可能是需要登录或 JS 动态渲染的页面）。可改用「粘贴文本」。'
+        + ' 也可以先在浏览器标签页打开该网址，再重新点击读取。'
     )
   }
   return { url: u.toString(), title, text }

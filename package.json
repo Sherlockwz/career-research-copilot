@@ -1,11 +1,12 @@
 {
   "name": "career-research-copilot",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "求职/科研助手 Chrome 插件：简历解析、自动预填、页面扫描与匹配/套词建议",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "test": "node --test tests/*.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

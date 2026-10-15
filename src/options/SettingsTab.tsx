@@ -40,15 +40,24 @@ export function SettingsTab() {
   }
 
   async function handleSave() {
-    await saveSettings(s)
-    setSaved(true)
+    try {
+      await saveSettings(s)
+      setSaved(true)
+      setTest('')
+    } catch (e) {
+      setTest('❌ 保存失败：' + String((e as Error).message ?? e))
+    }
   }
 
   async function handleTest() {
     setTest('测试中…')
-    await saveSettings(s) // 先存，background 读的是存储值
-    const r = await api.testLlm()
-    setTest(r.ok ? '✅ 连接成功' : '❌ ' + (r.error ?? '失败'))
+    try {
+      await saveSettings(s) // 先存，background 读的是存储值
+      const r = await api.testLlm()
+      setTest(r.ok ? '✅ 连接成功' : '❌ ' + (r.error ?? '失败'))
+    } catch (e) {
+      setTest('❌ ' + String((e as Error).message ?? e))
+    }
   }
 
   const hint = PROVIDER_PRESETS[s.provider]?.hint
@@ -57,7 +66,10 @@ export function SettingsTab() {
     <div className="max-w-xl space-y-4">
       <h2 className="text-lg font-semibold">模型设置</h2>
       <p className="text-sm text-slate-500">
-        API Key 仅保存在你本机的浏览器存储中，不会上传到任何第三方（调用直接发往你选择的服务商）。
+        API Key 保存在本机浏览器存储中；调用模型时会发送给你选择的服务商，不经过本项目服务器。
+      </p>
+      <p className="text-sm text-slate-500">
+        简历解析和网页分析会将相关文本及个人数据发送给该服务商。
       </p>
 
       <div>

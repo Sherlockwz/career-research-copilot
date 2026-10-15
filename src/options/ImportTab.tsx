@@ -8,7 +8,7 @@ export function ImportTab({
   onImported,
 }: {
   profile: ProfileData
-  onImported: (p: ProfileData) => void
+  onImported: (p: ProfileData) => Promise<void>
 }) {
   const [status, setStatus] = useState('')
   const [busy, setBusy] = useState(false)
@@ -27,7 +27,7 @@ export function ImportTab({
     try {
       const r = await api.structure(text, hasData) // 已有数据则合并
       if (!r.ok || !r.profile) throw new Error(r.error ?? '解析失败')
-      onImported(r.profile)
+      await onImported(r.profile)
       setStatus('✅ 解析完成，请到「数据编辑」核对。')
     } catch (e) {
       setStatus('❌ ' + String((e as Error).message ?? e))
@@ -47,7 +47,7 @@ export function ImportTab({
     try {
       const r = await api.structureUrl(url.trim(), hasData)
       if (!r.ok || !r.profile) throw new Error(r.error ?? '解析失败')
-      onImported(r.profile)
+      await onImported(r.profile)
       setStatus('✅ 已从主页读取并解析完成，请到「数据编辑」核对。')
     } catch (e) {
       setStatus('❌ ' + String((e as Error).message ?? e))

@@ -10,7 +10,8 @@
 需要 **Node.js ≥ 18**。
 
 ```bash
-npm install
+npm ci
+npm test
 npm run build          # = tsc --noEmit && vite build，产物在 dist/
 ```
 
@@ -73,7 +74,7 @@ src/
 
 典型链路：
 - **简历解析**：ImportTab → `STRUCTURE_TEXT` / `STRUCTURE_URL` → background 调LLM → 返回 ProfileData → 存IndexedDB。
-- **页面扫描**：Popup → content `SCAN_PAGE`（抓正文+判类型）→ Popup 拿到后 → background `ANALYZE_PAGE` → LLM → 结果暂存 chrome.storage → SidePanel 监听渲染。
+- **页面扫描**：Popup → content `SCAN_PAGE`（旧标签页无接收端时按需注入）→ background `QUEUE_ANALYSIS` 写入待处理状态 → Popup 在用户点击手势内打开 SidePanel → SidePanel 调用 background `ANALYZE_PAGE` → LLM → SidePanel 持久化结果/错误。
 - **自动预填**：FillPanel → content `DETECT_FIELDS` → `match.ts` 匹配 → content `APPLY_FILL`（填入+高亮）→ 用户改→ 再 `DETECT_FIELDS` 比对 → 更新映射 + 回写。
 
 存储：`lib/storage/settings.ts`（chrome.storage.local：LLM 设置、字段映射）+ `lib/storage/profile.ts`（IndexedDB：ProfileData、简历原文）。
@@ -81,13 +82,13 @@ src/
 ## 5. 已知问题与待办（欢迎从这里下手）
 
 **功能层面**
-- [ ] **主页抓取**在真实网站上未大规模实测。学术主页（Google Scholar、SPA/纯 JS 渲染）可能 `fetch` 抓不全 —— 已有「粘贴文本」兜底，但体验可优化（如改用打开后台标签页抓渲染后 DOM）。
+- [ ] **主页抓取**在真实网站上未大规模实测。已打开的同网址标签页优先读取渲染后的 DOM；未打开的页面仍用 `fetch`，学术主页（Google Scholar、SPA/纯 JS 渲染）可能抓不全，可先打开页面或粘贴文本。
 - [ ] **表单探测/填入**（`content/index.ts` + `forms/match.ts`）未在大量真实招聘官网验证。React 受控组件已用原生 setter +派发事件兼容，但复杂组件库（如某些自研下拉/日期控件）可能填不进。
 - [ ] **数据回写**目前只支持 `basic.*` 直接字段（见 `FillPanel.tsx` 的 `applyWriteBack`），经历/教育等数组字段的回写未做。
 - [ ] 启发式页面类型识别（`signature.ts` 的 `detectPageKind`）较粗，可结合更多信号。
 
 **工程层面**
-- [ ] **无自动化测试框架**。开发期只用过手写 Node 脚本验证纯逻辑（未入库）。建议引入 Vitest，把 `extractJson` / `matchFields` / `htmlToText` 固化为单测。
+- [ ] 已加入 `node --test` 回归测试，覆盖旧标签页注入、受限制页面报错和不安全预填字段；`extractJson` / `htmlToText` 等纯逻辑仍可继续补测。
 - [ ] **无插件图标**（`manifest.json` 无 `icons`，Chrome 用默认占位图）。需补一套 16/48/128 图标。
 - [ ] `npm install` 有安全告警（1 moderate + 1 high，来自 @crxjs beta 依赖链），暂不影响构建，可评估升级。
 - [ ] i18n：文案目前中文硬编码，若要做英文界面需抽取。
@@ -103,4 +104,4 @@ src/
 
 - **不要提交 `*.pem`（Chrome 打包私钥）**，已在 `.gitignore` 排除。`node_modules`、`dist`、`.claude/` 也已忽略。
 - API Key 属于用户隐私，只存本地、只在 background 读，别往content script 或日志里传。
-- 构建产物的 zip 见仓库 `release/` 目录（若需免构建直接安装）。
+- 当前构建产物的 zip 是 `release/career-research-copilot-v0.1.1.zip`（若需免构建直接安装）；旧版 v0.1.0 zip 保留作历史版本。
