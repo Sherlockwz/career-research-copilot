@@ -1,18 +1,29 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { Suggestion, JdSuggestion, ProfessorSuggestion } from '@/types'
-import type { ScannedPage } from '@/shared/messages'
-import { readSuggestion, onSuggestionChange } from '@/shared/ui'
+import type { AnalysisState } from '@/shared/messages'
+import { readAnalysis, onAnalysisChange, finishAnalysis, api } from '@/shared/ui'
 
 export function SidePanel() {
-  const [data, setData] = useState<{ s: Suggestion; page: ScannedPage } | null>(
-    null
-  )
+  const [data, setData] = useState<AnalysisState | null>(null)
+  const started = useRef<string | null>(null)
 
   useEffect(() => {
-    readSuggestion().then(setData)
-    return onSuggestionChange(() => readSuggestion().then(setData))
+    const refresh = () => readAnalysis().then(setData)
+    void refresh()
+    return onAnalysisChange(() => { void refresh() })
   }, [])
+
+  useEffect(() => {
+    if (data?.status !== 'pending' || started.current === data.requestId) return
+    started.current = data.requestId
+    void api.analyze(data.page)
+      .then((result) => {
+        if (!result.ok || !result.suggestion) throw new Error(result.error ?? '分析失败')
+        return finishAnalysis(data.requestId, { suggestion: result.suggestion })
+      })
+      .catch((error) => finishAnalysis(data.requestId, { error: String((error as Error).message ?? error) }))
+  }, [data])
 
   if (!data) {
     return (
@@ -22,15 +33,25 @@ export function SidePanel() {
     )
   }
 
+  if (data.status === 'pending') {
+    return <div className="p-6 text-sm text-slate-600">正在分析「{data.page.title || data.page.host}」…</div>
+  }
+
+  if (data.status === 'error') {
+    return <div className="p-6 text-sm text-red-600">分析失败：{data.error}</div>
+  }
+
+  const s: Suggestion = data.suggestion
+
   return (
     <div className="p-4 text-sm text-slate-800">
       <div className="text-xs text-slate-400 mb-1 truncate" title={data.page.url}>
         {data.page.title || data.page.host}
       </div>
-      {data.s.kind === 'jd' ? (
-        <JdView s={data.s} />
+      {s.kind === 'jd' ? (
+        <JdView s={s} />
       ) : (
-        <ProfessorView s={data.s} />
+        <ProfessorView s={s} />
       )}
     </div>
   )

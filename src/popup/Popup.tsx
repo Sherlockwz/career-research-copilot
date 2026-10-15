@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ScannedPage } from '@/shared/messages'
 import type { PageKind } from '@/types'
-import { useProfile, api, stashSuggestion } from '@/shared/ui'
+import { useProfile, api } from '@/shared/ui'
 import { FillPanel } from './FillPanel'
 
 const KIND_LABEL: Record<PageKind, string> = {
@@ -12,39 +12,54 @@ const KIND_LABEL: Record<PageKind, string> = {
 }
 
 export function Popup() {
-  const { profile, loading } = useProfile()
+  const { profile, loading, error: profileError } = useProfile()
   const [page, setPage] = useState<ScannedPage | null>(null)
-  const [busy, setBusy] = useState<string>('')
   const [error, setError] = useState('')
+  const [pageError, setPageError] = useState('')
+  const [readingPage, setReadingPage] = useState(true)
+  const [analysisKind, setAnalysisKind] = useState<'jd' | 'professor'>('jd')
+  const [windowId, setWindowId] = useState<number | null>(null)
   const [view, setView] = useState<'home' | 'fill'>('home')
 
   // 打开时探测当前页类型
   useEffect(() => {
-    api
-      .scanPage()
-      .then(setPage)
-      .catch(() => setPage(null))
+    void loadPage()
   }, [])
+
+  async function loadPage() {
+    setReadingPage(true)
+    setPageError('')
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      setWindowId(tab?.windowId ?? null)
+      const result = await api.scanPage()
+      if (!result || typeof result.text !== 'string' || typeof result.url !== 'string') {
+        throw new Error('页面脚本返回的数据无效，请刷新网页后重试。')
+      }
+      setPage(result)
+      setAnalysisKind(result.kind === 'professor' ? 'professor' : 'jd')
+    } catch (e) {
+      setPage(null)
+      setPageError(String((e as Error).message ?? e))
+    } finally {
+      setReadingPage(false)
+    }
+  }
 
   const completeness = profileCompleteness(profile)
 
-  async function handleAnalyze() {
+  function handleAnalyze() {
     if (!page) return
     setError('')
-    setBusy('分析中…')
-    try {
-      const cur = page.kind === 'unknown' || page.kind === 'form' ? { ...page, kind: 'jd' as PageKind } : page
-      const r = await api.analyze(cur)
-      if (!r.ok || !r.suggestion) throw new Error(r.error ?? '分析失败')
-      await stashSuggestion(r.suggestion, cur)
-      // 打开 side panel 展示
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-      if (tab?.windowId != null) await chrome.sidePanel.open({ windowId: tab.windowId })
-    } catch (e) {
-      setError(String((e as Error).message ?? e))
-    } finally {
-      setBusy('')
-    }
+    const cur: ScannedPage = { ...page, kind: analysisKind }
+    // 先发起后台请求，再在本次点击手势内立即打开侧边栏。
+    void chrome.runtime.sendMessage({ type: 'QUEUE_ANALYSIS', page: cur, requestId: crypto.randomUUID() })
+      .then((result: { ok: boolean; error?: string }) => {
+        if (!result?.ok) setError(result?.error ?? '无法开始分析')
+      })
+      .catch((e) => setError(String((e as Error).message ?? e)))
+    void chrome.sidePanel.open({ windowId: windowId ?? chrome.windows.WINDOW_ID_CURRENT })
+      .catch((e) => setError(`无法打开侧边栏：${String((e as Error).message ?? e)}`))
   }
 
   if (view === 'fill') {
@@ -93,24 +108,41 @@ export function Popup() {
             <div className="text-xs text-slate-500 mt-0.5">
               识别为：<span className="text-brand-600">{KIND_LABEL[page.kind]}</span>
             </div>
+            <details className="text-xs text-slate-500 mt-2">
+              <summary className="cursor-pointer">已读取 {page.text.length} 字，查看摘录</summary>
+              <p className="whitespace-pre-wrap max-h-24 overflow-auto mt-1">{page.text.slice(0, 500)}</p>
+            </details>
           </>
         ) : (
-          <div className="text-xs text-slate-400">无法读取当前页（可能是浏览器内置页）</div>
+          <div className="text-xs text-slate-500">{readingPage ? '正在读取当前页…' : pageError || '无法读取当前页'}</div>
         )}
+        <button onClick={() => void loadPage()} disabled={readingPage} className="text-xs text-brand-600 hover:underline mt-2 disabled:opacity-50">
+          重新读取
+        </button>
       </div>
 
       {error && (
         <div className="rounded bg-red-50 text-red-600 text-xs p-2 mb-3">{error}</div>
       )}
+      {profileError && <div className="rounded bg-red-50 text-red-600 text-xs p-2 mb-3">个人数据加载失败：{profileError}</div>}
 
       {/* 操作 */}
       <div className="grid grid-cols-1 gap-2">
+        {page && (
+          <label className="text-xs text-slate-600">
+            分析用途
+            <select value={analysisKind} onChange={(e) => setAnalysisKind(e.target.value as 'jd' | 'professor')} className="ml-2 border border-slate-200 rounded px-2 py-1">
+              <option value="jd">岗位</option>
+              <option value="professor">教授 / 科研主页</option>
+            </select>
+          </label>
+        )}
         <button
-          disabled={!page || !!busy}
+          disabled={!page}
           onClick={handleAnalyze}
           className="w-full rounded-lg bg-brand-500 text-white py-2 font-medium disabled:opacity-50 hover:bg-brand-600"
         >
-          {busy || '扫描当前页并给建议'}
+          扫描当前页并给建议
         </button>
         <button
           disabled={!page}

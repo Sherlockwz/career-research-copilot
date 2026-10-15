@@ -64,9 +64,14 @@ export function FillPanel({
       confidence: r.confidence,
       profilePath: r.profilePath,
     }))
-    const r = await api.applyFill(instructions)
-    setPhase('filled')
-    setStatus(`已填入 ${r.filled} 个字段。修改后可点「确认并学习」。`)
+    try {
+      const r = await api.applyFill(instructions)
+      if (!r.ok) throw new Error('填入失败')
+      setPhase('filled')
+      setStatus(`已填入 ${r.filled} / ${rows.length} 个字段。未填入的下拉选项或已变化字段请手动检查。修改后可点「确认并学习」。`)
+    } catch (e) {
+      setStatus('填入失败：' + String((e as Error).message ?? e))
+    }
   }
 
   // 确认并学习：重新探测当前值，与建议比对，更新映射；并提示数据回写
@@ -76,10 +81,9 @@ export function FillPanel({
       const now = Date.now()
       const writeBack: { path: string; value: string; label: string }[] = []
       for (const row of rows) {
-        const cur = fields.find(
-          (f) => signatureKey(f.signature) === signatureKey(row.signature)
-        )
-        const finalVal = cur?.currentValue ?? row.edited
+        const cur = fields.find((f) => f.refId === row.refId)
+        if (!cur) continue // 页面重绘后原字段已消失，不能错误地学习其他字段
+        const finalVal = cur.currentValue
         // 更新映射：用户保留/修正了该字段的映射即视为一次确认
         const mapping: FieldMapping = {
           host,
@@ -92,7 +96,7 @@ export function FillPanel({
         }
         await upsertMapping(mapping)
         // 数据回写候选：用户把值改得和 profile 不同 -> 建议回写
-        if (finalVal && finalVal !== row.value) {
+        if (row.profilePath.startsWith('basic.') && finalVal && finalVal !== row.value) {
           writeBack.push({ path: row.profilePath, value: finalVal, label: row.label })
         }
       }

@@ -15,7 +15,7 @@ const TABS: { id: Tab; label: string }[] = [
 ]
 
 export function Options() {
-  const { profile, setProfile, save, loading } = useProfile()
+  const { profile, setProfile, save, loading, error } = useProfile()
   const [tab, setTab] = useState<Tab>('settings')
 
   return (
@@ -25,6 +25,7 @@ export function Options() {
         <p className="text-sm text-slate-500 mb-4">
           配置模型、管理简历数据与预填映射。所有数据仅存本地。
         </p>
+        {error && <p className="text-sm text-red-600 mb-4">个人数据加载失败：{error}</p>}
 
         <div className="flex gap-1 border-b border-slate-200 mb-6">
           {TABS.map((t) => (

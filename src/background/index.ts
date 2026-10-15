@@ -2,10 +2,12 @@
 // API Key 只在此读取，不下发到 content script。
 import type {
   Message,
+  ScannedPage,
   StructureResult,
   AnalyzeResult,
   TestLlmResult,
 } from '@/shared/messages'
+import { sendToTab } from '@/shared/messages'
 import type { ProfileData } from '@/types/profile'
 import { emptyProfile } from '@/types/profile'
 import type { Suggestion } from '@/types'
@@ -57,6 +59,16 @@ async function handle(msg: Message): Promise<unknown> {
     case 'ANALYZE_PAGE':
       return analyzePage(msg.page.kind, msg.page.text)
 
+    case 'QUEUE_ANALYSIS':
+      await chrome.storage.local.set({
+        currentAnalysis: {
+          status: 'pending',
+          page: msg.page,
+          requestId: msg.requestId,
+        },
+      })
+      return { ok: true }
+
     default:
       return { ok: false, error: `未知消息: ${(msg as { type: string }).type}` }
   }
@@ -103,8 +115,34 @@ async function structureUrl(
   mergeInto: boolean
 ): Promise<StructureResult> {
   try {
-    const page = await fetchPageText(url)
-    return structureText(page.text, mergeInto)
+    let target: URL
+    try {
+      target = new URL(url)
+    } catch {
+      throw new Error('链接格式不正确，请填写完整网址（含 http/https）')
+    }
+    if (target.protocol !== 'http:' && target.protocol !== 'https:') {
+      throw new Error('只支持 http/https 链接')
+    }
+    const tabs = await chrome.tabs.query({})
+    const openTab = tabs.find((tab) => {
+      try {
+        const current = new URL(tab.url ?? '')
+        return current.origin === target.origin && current.pathname === target.pathname && current.search === target.search
+      } catch {
+        return false
+      }
+    })
+    let text: string | undefined
+    if (openTab) {
+      try {
+        text = (await sendToTab<ScannedPage>(openTab, { type: 'SCAN_PAGE' })).text
+      } catch {
+        // 站点禁止注入时继续尝试网络抓取。
+      }
+    }
+    if (!text) text = (await fetchPageText(url)).text
+    return structureText(text, mergeInto)
   } catch (e) {
     return { ok: false, error: String((e as Error).message ?? e) }
   }

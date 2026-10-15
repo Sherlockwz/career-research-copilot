@@ -15,6 +15,8 @@ const HIGHLIGHT_LOW_CLASS = 'ccp-highlight-low'
 
 // refId -> 元素，用于预填回填定位
 const fieldRegistry = new Map<string, FormEl>()
+const fieldIds = new WeakMap<FormEl, string>()
+let nextFieldId = 0
 
 injectStyles()
 
@@ -43,6 +45,9 @@ chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
 // ---- 抓取正文 ----
 function scanPage(): ScannedPage {
   const text = extractMainText()
+  if (text.length < 20) {
+    throw new Error('当前网页正文尚未加载或无法提取。请等待页面加载完成后点“重新读取”；登录页或嵌入式 PDF 可先复制正文。')
+  }
   const url = location.href
   const host = location.host
   const title = document.title
@@ -50,17 +55,16 @@ function scanPage(): ScannedPage {
 }
 
 function extractMainText(): string {
-  // 优先 main/article，退化到 body。去脚本/样式/导航。
-  const root =
-    document.querySelector('main') ??
-    document.querySelector('article') ??
-    document.body
-  const clone = root.cloneNode(true) as HTMLElement
-  clone
-    .querySelectorAll('script,style,noscript,svg,nav,footer,header')
-    .forEach((el) => el.remove())
-  const raw = clone.innerText || clone.textContent || ''
-  return raw.replace(/\n{3,}/g, '\n\n').replace(/[ \t]{2,}/g, ' ').trim().slice(0, 20000)
+  // 一些站点的 main 只是空壳，正文在 article 或 body 的其他位置。
+  const roots = [document.querySelector('main'), document.querySelector('article'), document.body]
+    .filter((root): root is HTMLElement => root instanceof HTMLElement)
+  const candidates = roots.map((root) => {
+    const clone = root.cloneNode(true) as HTMLElement
+    clone.querySelectorAll('script,style,noscript,svg,nav,footer,header,[hidden],[aria-hidden="true"]').forEach((el) => el.remove())
+    clone.querySelectorAll('p,div,li,section,article,h1,h2,h3,h4,h5,h6,br').forEach((el) => el.append('\n'))
+    return (clone.textContent ?? '').replace(/\n{3,}/g, '\n\n').replace(/[ \t]{2,}/g, ' ').trim()
+  })
+  return candidates.sort((a, b) => b.length - a.length)[0]?.slice(0, 20000) ?? ''
 }
 
 // ---- 探测表单字段 ----
@@ -70,8 +74,12 @@ function detectFields(): { fields: DetectedField[]; host: string; url: string } 
     document.querySelectorAll<FormEl>('input, textarea, select')
   ).filter(isFillable)
 
-  const fields: DetectedField[] = els.map((el, i) => {
-    const refId = `ccp-${i}`
+  const fields: DetectedField[] = els.map((el) => {
+    let refId = fieldIds.get(el)
+    if (!refId) {
+      refId = `ccp-${nextFieldId++}`
+      fieldIds.set(el, refId)
+    }
     fieldRegistry.set(refId, el)
     el.dataset.ccpRef = refId
     return {
@@ -85,12 +93,12 @@ function detectFields(): { fields: DetectedField[]; host: string; url: string } 
 
 function isFillable(el: FormEl): boolean {
   if (el instanceof HTMLInputElement) {
-    const skip = ['hidden', 'submit', 'button', 'reset', 'file', 'image', 'password']
+    const skip = ['hidden', 'submit', 'button', 'reset', 'file', 'image', 'password', 'checkbox', 'radio']
     if (skip.includes(el.type)) return false
   }
   if (el.disabled || (el as HTMLInputElement).readOnly) return false
   const rect = el.getBoundingClientRect()
-  if (rect.width === 0 && rect.height === 0) return false // 不可见
+  if (rect.width === 0 || rect.height === 0) return false // 不可见
   return true
 }
 
@@ -129,8 +137,7 @@ function applyFill(instructions: FillInstruction[]): { ok: boolean; filled: numb
   let filled = 0
   for (const ins of instructions) {
     const el = fieldRegistry.get(ins.refId)
-    if (!el) continue
-    setNativeValue(el, ins.value)
+    if (!el?.isConnected || !setNativeValue(el, ins.value)) continue
     highlight(el, ins.confidence)
     filled++
   }
@@ -138,11 +145,13 @@ function applyFill(instructions: FillInstruction[]): { ok: boolean; filled: numb
 }
 
 // 兼容 React 受控组件：走原生 setter 再派发事件
-function setNativeValue(el: FormEl, value: string) {
+function setNativeValue(el: FormEl, value: string): boolean {
   if (el instanceof HTMLSelectElement) {
-    el.value = value
+    const option = Array.from(el.options).find((o) => o.value === value || o.text.trim() === value)
+    if (!option) return false
+    el.value = option.value
     el.dispatchEvent(new Event('change', { bubbles: true }))
-    return
+    return el.value === option.value
   }
   const proto =
     el instanceof HTMLTextAreaElement
@@ -152,6 +161,7 @@ function setNativeValue(el: FormEl, value: string) {
   setter?.call(el, value)
   el.dispatchEvent(new Event('input', { bubbles: true }))
   el.dispatchEvent(new Event('change', { bubbles: true }))
+  return el.value === value
 }
 
 function highlight(el: FormEl, confidence: number) {
