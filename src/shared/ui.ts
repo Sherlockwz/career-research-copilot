@@ -35,16 +35,37 @@ export function useProfile() {
   }, [])
 
   useEffect(() => {
-    reload()
+    void reload()
+    const listener = (changes: Record<string, chrome.storage.StorageChange>) => {
+      if (changes.profileRevision) void reload()
+    }
+    chrome.storage.onChanged.addListener(listener)
+    return () => chrome.storage.onChanged.removeListener(listener)
   }, [reload])
 
   const save = useCallback(async (p: ProfileData) => {
-    const result = await sendMessage<{ ok: boolean; error?: string }>({ type: 'SAVE_PROFILE', profile: p })
-    if (!result?.ok) throw new Error(result?.error ?? '保存个人数据失败')
-    setProfile(p)
+    const result = await sendMessage<{ ok: boolean; profile?: ProfileData; error?: string }>({ type: 'SAVE_PROFILE', profile: p })
+    if (!result?.ok || !result.profile) throw new Error(result?.error ?? '保存个人数据失败')
+    setProfile(result.profile)
   }, [])
 
-  return { profile, setProfile, loading, error, reload, save }
+  const replace = useCallback(async (p: ProfileData, expectedUpdatedAt: number) => {
+    const result = await sendMessage<{ ok: boolean; profile?: ProfileData; error?: string }>({
+      type: 'REPLACE_PROFILE', profile: p, expectedUpdatedAt,
+    })
+    if (!result?.ok || !result.profile) throw new Error(result?.error ?? '替换个人数据失败')
+    setProfile(result.profile)
+  }, [])
+
+  const clear = useCallback(async (expectedUpdatedAt: number) => {
+    const result = await sendMessage<{ ok: boolean; profile?: ProfileData; error?: string }>({
+      type: 'CLEAR_PERSONAL_DATA', expectedUpdatedAt,
+    })
+    if (!result?.ok || !result.profile) throw new Error(result?.error ?? '清空个人数据失败')
+    setProfile(result.profile)
+  }, [])
+
+  return { profile, setProfile, loading, error, reload, save, replace, clear }
 }
 
 // —— 各类后台/内容脚本调用封装 ——
@@ -62,10 +83,10 @@ export const api = {
   clearHighlight: () => sendToActiveTab({ type: 'HIGHLIGHT_CLEAR' }),
   analyze: (page: ScannedPage) =>
     sendMessage<AnalyzeResult>({ type: 'ANALYZE_PAGE', page }),
-  structure: (text: string, mergeInto: boolean) =>
-    sendMessage<StructureResult>({ type: 'STRUCTURE_TEXT', text, mergeInto }),
-  structureUrl: (url: string, mergeInto: boolean) =>
-    sendMessage<StructureResult>({ type: 'STRUCTURE_URL', url, mergeInto }),
+  structure: (text: string) =>
+    sendMessage<StructureResult>({ type: 'STRUCTURE_TEXT', text }),
+  structureUrl: (url: string) =>
+    sendMessage<StructureResult>({ type: 'STRUCTURE_URL', url }),
   testLlm: () => sendMessage<TestLlmResult>({ type: 'TEST_LLM' }),
 }
 

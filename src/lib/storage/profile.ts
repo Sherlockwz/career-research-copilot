@@ -34,16 +34,6 @@ async function kvGet<T>(key: string): Promise<T | undefined> {
   })
 }
 
-async function kvSet(key: string, value: unknown): Promise<void> {
-  const db = await openDb()
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_KV, 'readwrite')
-    tx.objectStore(STORE_KV).put(value, key)
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error)
-  })
-}
-
 const K_PROFILE = 'profile'
 const K_RAW_RESUME = 'rawResumeText'
 
@@ -52,12 +42,51 @@ export async function loadProfile(): Promise<ProfileData> {
   return p ?? emptyProfile()
 }
 
-export async function saveProfile(profile: ProfileData): Promise<void> {
-  await kvSet(K_PROFILE, { ...profile, updatedAt: Date.now() })
+// 在同一事务中比较版本并写入，拒绝旧窗口/旧表单把上一位求职人的数据写回来。
+async function writeProfile(
+  profile: ProfileData,
+  expectedUpdatedAt: number,
+  clearRawResume: boolean
+): Promise<ProfileData> {
+  const db = await openDb()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_KV, 'readwrite')
+    const store = tx.objectStore(STORE_KV)
+    let saved: ProfileData
+    const request = store.get(K_PROFILE)
+    request.onsuccess = () => {
+      const current = (request.result as ProfileData | undefined) ?? emptyProfile()
+      if (current.updatedAt !== expectedUpdatedAt) {
+        reject(new Error('个人数据已在其他窗口更新，请刷新后重试，避免混合不同求职人的信息。'))
+        tx.abort()
+        return
+      }
+      saved = { ...profile, updatedAt: Math.max(Date.now(), current.updatedAt + 1) }
+      store.put(saved, K_PROFILE)
+      if (clearRawResume) store.delete(K_RAW_RESUME)
+    }
+    tx.oncomplete = () => resolve(saved)
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error)
+  })
+}
+
+export function saveProfile(profile: ProfileData): Promise<ProfileData> {
+  return writeProfile(profile, profile.updatedAt, false)
+}
+
+export function replaceProfile(profile: ProfileData, expectedUpdatedAt: number): Promise<ProfileData> {
+  return writeProfile(profile, expectedUpdatedAt, true)
 }
 
 export async function saveRawResume(text: string): Promise<void> {
-  await kvSet(K_RAW_RESUME, text)
+  const db = await openDb()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_KV, 'readwrite')
+    tx.objectStore(STORE_KV).put(text, K_RAW_RESUME)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
 }
 
 export async function loadRawResume(): Promise<string | undefined> {

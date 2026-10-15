@@ -107,3 +107,13 @@ export function emptyProfile(): ProfileData {
     updatedAt: 0,
   }
 }
+
+export function hasProfileData(profile: ProfileData): boolean {
+  return Object.values(profile.basic).some((value) => typeof value === 'string' && Boolean(value.trim())) ||
+    profile.education.length > 0 ||
+    profile.experiences.length > 0 ||
+    profile.publications.length > 0 ||
+    profile.skills.length > 0 ||
+    profile.languages.length > 0 ||
+    profile.summaries.length > 0
+}

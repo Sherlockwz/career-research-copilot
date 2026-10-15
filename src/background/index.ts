@@ -12,7 +12,7 @@ import type { ProfileData } from '@/types/profile'
 import { emptyProfile } from '@/types/profile'
 import type { Suggestion } from '@/types'
 import { getSettings } from '@/lib/storage/settings'
-import { loadProfile, saveProfile } from '@/lib/storage/profile'
+import { loadProfile, saveProfile, replaceProfile } from '@/lib/storage/profile'
 import { chat, extractJson, supportsJsonMode } from '@/lib/llm'
 import { fetchPageText } from '@/lib/resume/fetchPage'
 import {
@@ -44,17 +44,22 @@ async function handle(msg: Message): Promise<unknown> {
       return loadProfile()
 
     case 'SAVE_PROFILE':
-      await saveProfile(msg.profile)
-      return { ok: true }
+      return profileResult(await saveProfile(msg.profile))
+
+    case 'REPLACE_PROFILE':
+      return profileResult(await replaceProfileAndClear(msg.profile, msg.expectedUpdatedAt))
+
+    case 'CLEAR_PERSONAL_DATA':
+      return profileResult(await replaceProfileAndClear(emptyProfile(), msg.expectedUpdatedAt))
 
     case 'TEST_LLM':
       return testLlm()
 
     case 'STRUCTURE_TEXT':
-      return structureText(msg.text, msg.mergeInto ?? false)
+      return structureText(msg.text)
 
     case 'STRUCTURE_URL':
-      return structureUrl(msg.url, msg.mergeInto ?? false)
+      return structureUrl(msg.url)
 
     case 'ANALYZE_PAGE':
       return analyzePage(msg.page.kind, msg.page.text)
@@ -74,6 +79,17 @@ async function handle(msg: Message): Promise<unknown> {
   }
 }
 
+async function profileResult(profile: ProfileData) {
+  await chrome.storage.local.set({ profileRevision: profile.updatedAt })
+  return { ok: true, profile }
+}
+
+async function replaceProfileAndClear(profile: ProfileData, expectedUpdatedAt: number) {
+  const saved = await replaceProfile(profile, expectedUpdatedAt)
+  await chrome.storage.local.remove(['fieldMappings', 'currentAnalysis'])
+  return saved
+}
+
 async function testLlm(): Promise<TestLlmResult> {
   try {
     const settings = await getSettings()
@@ -88,10 +104,7 @@ async function testLlm(): Promise<TestLlmResult> {
   }
 }
 
-async function structureText(
-  text: string,
-  mergeInto: boolean
-): Promise<StructureResult> {
+async function structureText(text: string): Promise<StructureResult> {
   try {
     const settings = await getSettings()
     const r = await chat(settings, {
@@ -101,19 +114,14 @@ async function structureText(
       maxTokens: 8192,
     })
     const parsed = extractJson<Partial<ProfileData>>(r.text)
-    const base: ProfileData = mergeInto ? await loadProfile() : emptyProfile()
-    const merged = mergeProfile(base, parsed)
-    return { ok: true, profile: merged }
+    return { ok: true, profile: profileFromExtraction(parsed) }
   } catch (e) {
     return { ok: false, error: String((e as Error).message ?? e) }
   }
 }
 
 // 抓取主页 URL -> 提取正文 -> 复用结构化管线
-async function structureUrl(
-  url: string,
-  mergeInto: boolean
-): Promise<StructureResult> {
+async function structureUrl(url: string): Promise<StructureResult> {
   try {
     let target: URL
     try {
@@ -142,18 +150,18 @@ async function structureUrl(
       }
     }
     if (!text) text = (await fetchPageText(url)).text
-    return structureText(text, mergeInto)
+    return structureText(text)
   } catch (e) {
     return { ok: false, error: String((e as Error).message ?? e) }
   }
 }
 
-// 合并抽取结果：数组类拼接去空，basic 逐字段覆盖非空值
-function mergeProfile(base: ProfileData, add: Partial<ProfileData>): ProfileData {
-  const out: ProfileData = JSON.parse(JSON.stringify(base))
+// 每次导入只从本次抽取结果构造新资料，绝不读取旧人的字段或数组。
+function profileFromExtraction(add: Partial<ProfileData>): ProfileData {
+  const out = emptyProfile()
   if (add.basic) {
     for (const [k, v] of Object.entries(add.basic)) {
-      if (v) (out.basic as Record<string, unknown>)[k] = v
+      if (typeof v === 'string' && v.trim()) (out.basic as Record<string, unknown>)[k] = v
     }
   }
   const arrays: (keyof ProfileData)[] = [
@@ -165,10 +173,8 @@ function mergeProfile(base: ProfileData, add: Partial<ProfileData>): ProfileData
     'summaries',
   ]
   for (const key of arrays) {
-    const incoming = (add[key] as unknown[]) ?? []
-    if (incoming.length) {
-      ;(out[key] as unknown[]) = [...(out[key] as unknown[]), ...incoming]
-    }
+    const incoming = add[key]
+    if (Array.isArray(incoming)) (out[key] as unknown[]) = incoming
   }
   out.updatedAt = 0 // 交由 saveProfile 打时间戳
   return out

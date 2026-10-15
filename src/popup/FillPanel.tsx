@@ -25,10 +25,19 @@ export function FillPanel({
   const [status, setStatus] = useState('')
   const [phase, setPhase] = useState<'idle' | 'matched' | 'filled'>('idle')
 
+  async function ensureCurrentApplicant() {
+    const current = await chrome.runtime.sendMessage({ type: 'GET_PROFILE' }) as ProfileData
+    if (current.updatedAt !== profile.updatedAt) {
+      throw new Error('求职人资料已更换或更新，请重新打开插件后再操作表单。')
+    }
+  }
+
   async function handleDetect() {
     setStatus('探测表单…')
     try {
+      await ensureCurrentApplicant()
       const { fields, host } = await api.detectFields()
+      await ensureCurrentApplicant()
       setHost(host)
       const mappings = await getMappings(host)
       const matches = matchFields(fields, profile, mappings)
@@ -65,6 +74,7 @@ export function FillPanel({
       profilePath: r.profilePath,
     }))
     try {
+      await ensureCurrentApplicant()
       const r = await api.applyFill(instructions)
       if (!r.ok) throw new Error('填入失败')
       setPhase('filled')
@@ -77,7 +87,9 @@ export function FillPanel({
   // 确认并学习：重新探测当前值，与建议比对，更新映射；并提示数据回写
   async function handleLearn() {
     try {
+      await ensureCurrentApplicant()
       const { fields } = await api.detectFields()
+      await ensureCurrentApplicant()
       const now = Date.now()
       const writeBack: { path: string; value: string; label: string }[] = []
       for (const row of rows) {
@@ -94,6 +106,7 @@ export function FillPanel({
           hitCount: 1,
           updatedAt: now,
         }
+        await ensureCurrentApplicant()
         await upsertMapping(mapping)
         // 数据回写候选：用户把值改得和 profile 不同 -> 建议回写
         if (row.profilePath.startsWith('basic.') && finalVal && finalVal !== row.value) {
@@ -105,7 +118,10 @@ export function FillPanel({
         const ok = confirm(
           `检测到以下字段被你修改，是否回写到个人数据库（下次更准）？\n\n${list}`
         )
-        if (ok) await applyWriteBack(profile, writeBack)
+        if (ok) {
+          await ensureCurrentApplicant()
+          await applyWriteBack(profile, writeBack)
+        }
         setStatus(
           ok ? '映射已学习，数据已回写。' : '映射已学习（未回写数据）。'
         )
@@ -201,5 +217,6 @@ async function applyWriteBack(
       ;(next.basic as Record<string, unknown>)[key] = it.value
     }
   }
-  await chrome.runtime.sendMessage({ type: 'SAVE_PROFILE', profile: next })
+  const result = await chrome.runtime.sendMessage({ type: 'SAVE_PROFILE', profile: next }) as { ok: boolean; error?: string }
+  if (!result?.ok) throw new Error(result?.error ?? '回写个人数据失败')
 }
